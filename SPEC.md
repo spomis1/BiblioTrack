@@ -411,14 +411,167 @@ enum ListType {
 
 | Fase | Descripción | Duración estimada |
 |------|-------------|-------------------|
-| **0. Setup** | Repo GitHub, Vercel, Supabase, Next.js init | 1 día |
+| **0. Setup** | Repo GitHub, Vercel, Supabase, Next.js init | ✅ Completo |
 | **1. Core** | DB schema, integración Open Library + Google Books, catálogo | 1-2 semanas |
 | **2. Usuarios** | Auth, perfiles, listas personales | 1 semana |
 | **3. Ratings** | Sistema de estrellas, promedios, distribución | 3-4 días |
 | **4. Discovery** | Géneros, trending, recomendaciones básicas | 1 semana |
 | **5. SEO + Deploy** | Meta tags, sitemap, deploy en Vercel | 3-4 días |
 | **6. Afiliados** | Amazon Associates links en páginas de libros | 1-2 días |
+| **7. Publish** | Editorial digital — autores independientes | 2-3 semanas |
+| **8. Edit IA** | Agente editor con Claude + n8n | 3-4 semanas |
 
 ---
 
-*Spec generado el 2026-05-26. Versión 1.0.*
+## 13. BiblioTrack Publish — Editorial Digital
+
+### Concepto
+Módulo para que autores independientes publiquen directamente en BiblioTrack. Los libros publicados aquí aparecen en el catálogo general junto a los libros de Open Library/Google Books, pero con un badge "Publicado en BiblioTrack".
+
+### Ventaja competitiva vs mercado actual
+| Plataforma | Modelo | Royalties | Comunidad | Editor IA |
+|------------|--------|-----------|-----------|-----------|
+| Amazon KDP | Distribución | 70% | ❌ | ❌ |
+| Draft2Digital | Agregador | 90% neto | ❌ | ❌ |
+| Wattpad | Comunidad | <5% | ✅ | ❌ |
+| Reedsy | Marketplace servicios | N/A | Parcial | ❌ |
+| **BiblioTrack** | Todo en uno | **85%** | **✅** | **✅** |
+
+### Features V1 (MVP gratuito)
+- [ ] Upload de manuscrito (EPUB, DOCX, PDF)
+- [ ] Configurar portada (upload de imagen)
+- [ ] Precio: gratis / pago / "paga lo que quieras"
+- [ ] Descripción, géneros, tags
+- [ ] Perfil de autor vinculado a cuenta de usuario
+- [ ] El libro aparece en el catálogo con badge "BiblioTrack Author"
+- [ ] Dashboard del autor: lecturas, ratings, lectores únicos
+
+### Modelo de negocio
+- Publicar: siempre **gratis**
+- Libros gratuitos: gratis para siempre
+- Libros de pago: BiblioTrack toma **15%** (vs 30% de Amazon)
+- **Plan Pro Autor** ($9.99/mes): portadas premium, analíticas avanzadas, hasta 3 ediciones con IA por mes, badge verificado
+
+### Cambios en DB necesarios
+```prisma
+model Manuscript {
+  id          String           @id @default(cuid())
+  userId      String
+  bookId      String?          @unique  // null hasta publicar
+  title       String
+  status      ManuscriptStatus @default(DRAFT)
+  fileUrl     String           // Supabase Storage
+  coverUrl    String?
+  price       Decimal          @default(0)  // 0 = gratis
+  publishedAt DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  user        User             @relation(...)
+  book        Book?            @relation(...)
+  edits       EditSession[]
+}
+
+enum ManuscriptStatus {
+  DRAFT
+  EDITING      // Enviado al agente editor
+  REVIEW       // Esperando revisión del autor
+  PUBLISHED
+}
+```
+
+---
+
+## 14. BiblioTrack Edit — Agente Editor IA
+
+### Concepto
+Pipeline de edición con Claude que lee el libro **completo**, aprende la voz del autor, y devuelve sugerencias como track-changes. No reemplaza al editor humano — hace el trabajo que un editor humano cobra $500-$2000 por hacer.
+
+### Lo que lo diferencia de "pegarle texto a ChatGPT"
+1. **Lee el libro entero** (Claude 200k tokens ≈ 150.000 palabras) antes de editar
+2. **Aprende tu estilo** primero — genera un "perfil de voz del autor"
+3. **Devuelve track-changes** — vos aceptás o rechazás cada cambio
+4. **No inventa contenido nuevo** — solo sugiere mejoras a lo tuyo
+5. **4 pasadas distintas** para distintos aspectos (no todo junto)
+
+### Pipeline (n8n + Claude API)
+
+```
+PASO 1 — Análisis de Voz (gratis, siempre)
+  Claude lee cap. 1-3
+  → Detecta: tono, longitud promedio de oraciones, vocabulario,
+    POV, tiempo verbal, estilo de diálogos, recursos favoritos
+  → Genera: "Perfil de Voz del Autor" (JSON)
+  → Output: reporte legible para el autor
+
+PASO 2 — Análisis Estructural (Pro)
+  Claude lee el manuscrito completo
+  → Evalúa: pacing por capítulo, consistencia de personajes,
+    arco narrativo, plot holes, balance diálogo/narración
+  → Genera: "Informe Estructural" con heatmap de tensión
+
+PASO 3 — Edición de Línea (Pro)
+  Capítulo por capítulo, usando el Perfil de Voz
+  → Sugiere: claridad, redundancias, repeticiones de palabras,
+    frases débiles — RESPETANDO el estilo detectado
+  → Devuelve: diff con accepts/rejects por párrafo
+
+PASO 4 — Corrección (Pro)
+  Gramática, ortografía, puntuación
+  → Devuelve: versión limpia con cambios marcados
+```
+
+### Stack técnico del agente
+- **n8n** (self-hosted en un VPS barato, ej: DigitalOcean $6/mes) — orquestador
+- **Claude API** modelo `claude-opus-4-7` — el editor
+- **Supabase Storage** — almacenamiento de manuscritos y resultados
+- **Webhook** desde Next.js → dispara el flujo de n8n
+- **Email** (Resend, gratis hasta 3000/mes) — notifica al autor cuando termina
+
+### Prompts clave (sistema)
+```
+Sistema para Paso 1 (Análisis de Voz):
+"Eres un editor literario senior. Tu tarea es analizar el estilo
+de escritura de este autor sin hacer juicios de valor. Identifica
+de manera objetiva: [lista de 12 dimensiones de estilo]. Devuelve
+un JSON estructurado con los hallazgos. NO corrijas nada todavía."
+
+Sistema para Paso 3 (Edición de Línea):
+"Eres un editor que ha leído este libro completo. El perfil de voz
+del autor es: [PERFIL]. Tu trabajo es MEJORAR sin cambiar la voz.
+Regla central: si dudas entre cambiar o dejar, dejá. Devuelve SOLO
+los párrafos con cambios, en formato diff."
+```
+
+### Modelo de negocio del editor
+| Feature | Gratis | Pro ($9.99/mes) |
+|---------|--------|-----------------|
+| Análisis de Voz (cap. 1-3) | ✅ | ✅ |
+| Informe Estructural | Primeros 3 cap. | Libro completo |
+| Edición de Línea | ❌ | ✅ (3/mes) |
+| Corrección | ❌ | ✅ |
+| Historial de ediciones | ❌ | ✅ |
+
+---
+
+## 15. FODA — BiblioTrack vs Competencia
+
+| | **Fortalezas** | **Debilidades** |
+|-|----------------|-----------------|
+| | Círculo virtuoso: lectores + autores en una app | Sin distribución física |
+| | Claude lee libros enteros (200k tokens) | Costo de API de Claude escala con uso |
+| | Mercado hispanohablante desatendido | Moderación de contenido es costosa |
+| | 15% comisión vs 30% de Amazon | Amazon KDP tiene el 80% del mercado |
+| | MVP 100% gratuito | |
+
+| | **Oportunidades** | **Amenazas** |
+|-|------------------|--------------|
+| | Goodreads sin innovación desde 2013 | Amazon puede copiar cualquier feature |
+| | Wattpad perdiendo foco (vendida a coreanos) | Regulaciones de IA cambiantes |
+| | Edición IA en etapa temprana | ProWritingAid puede agregar publicación |
+| | 600M hispanohablantes sin plataforma | Competencia puede bajar comisiones |
+| | Autores quieren más del 70% de royalties | |
+
+---
+
+*Spec actualizado el 2026-05-27. Versión 2.0.*
