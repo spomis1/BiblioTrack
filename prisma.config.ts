@@ -9,6 +9,7 @@ export default defineConfig({
     path: "prisma/migrations",
   },
   datasource: {
-    url: process.env["DATABASE_URL"],
+    // Usar DIRECT_URL para migraciones (pgbouncer no soporta DDL)
+    url: process.env["DIRECT_URL"] ?? process.env["DATABASE_URL"],
   },
 });
