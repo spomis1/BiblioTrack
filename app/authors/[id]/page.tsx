@@ -42,6 +42,18 @@ const SEMITIC_TRANSLIT = /\bha-[a-z]|\bal-[a-z]|\bba-[a-z]|\bbe-[a-z]+-[a-z]/i;
 // Compilaciones comerciales, packs, estudios académicos
 const JUNK_TITLE = /\b(pack|omnibus|collected works|selected works|complete works|anthology|criticism of|study of)\b/i;
 
+// Contracciones catalán/francés: d'atzar, l'interior, m'ha, n'est
+const CATALAN_FRENCH = /\b[dlnm]'[aeiouàáâäèéêëìíîïòóôöùúûü]/i;
+
+// Euskera: sufijo -zko, -tzeko, etc. ("Kristalezko hiria")
+const BASQUE = /zko\b/i;
+
+// Palabras exclusivamente francesas (nunca aparecen en español/inglés)
+const FRENCH_WORDS = /\b(chronique|poche|avec|dont)\b/i;
+
+// Marcadores de formato de edición (10X18, 10x12, etc.)
+const FORMAT_EDITION = /\b\d+[xX]\d+\b/;
+
 function normalizeTitle(title: string): string {
   return title
     .toLowerCase()
@@ -92,7 +104,11 @@ function filterAndDeduplicateWorks(entries: OLWork[], authorName: string): OLWor
     return (
       NON_LATIN.test(title) ||
       TURKISH_SPECIFIC.test(title) ||
-      SEMITIC_TRANSLIT.test(title)
+      SEMITIC_TRANSLIT.test(title) ||
+      CATALAN_FRENCH.test(title) ||
+      BASQUE.test(title) ||
+      FRENCH_WORDS.test(title) ||
+      FORMAT_EDITION.test(title)
     );
   };
 
@@ -158,7 +174,6 @@ export default async function AuthorPage({
   const bio = wiki?.extract ?? null;
   const wikiUrl = wiki?.content_urls?.desktop?.page ?? author.wikipedia ?? null;
 
-  const totalRaw = worksData.entries.length;
   const works = filterAndDeduplicateWorks(worksData.entries, author.name);
 
   return (
@@ -206,19 +221,9 @@ export default async function AuthorPage({
 
       {/* Obras */}
       <div>
-        <h2 className="mb-1 text-2xl font-bold text-zinc-900 dark:text-zinc-100">
+        <h2 className="mb-6 text-2xl font-bold text-zinc-900 dark:text-zinc-100">
           Obras
         </h2>
-        {/* Explicación del conteo */}
-        <p className="mb-6 text-sm text-zinc-400">
-          {works.length} título{works.length !== 1 ? "s" : ""} únicos
-          {totalRaw > works.length && (
-            <span className="ml-1">
-              · Open Library registra {totalRaw} entradas en total, incluyendo traducciones y
-              ediciones en distintos idiomas
-            </span>
-          )}
-        </p>
 
         {works.length === 0 ? (
           <p className="text-zinc-400">No se encontraron obras para este autor.</p>
