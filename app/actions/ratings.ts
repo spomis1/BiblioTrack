@@ -1,6 +1,5 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/lib/db";
 import { type BookData } from "./lists";
@@ -98,8 +97,6 @@ export async function rateBook(
     where: { id: book.id },
     data: { avgRating: btAvg, ratingsCount: btCount },
   });
-
-  revalidatePath(`/books/${bookData.openLibraryId}`);
 
   return { btAvg, btCount, userRating: score };
 }

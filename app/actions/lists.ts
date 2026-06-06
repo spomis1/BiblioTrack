@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { refresh } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { db } from "@/lib/db";
 
@@ -140,8 +140,8 @@ export async function toggleListItem(
       ["WANT_TO_READ", "READING", "READ"].includes(t)
     );
 
-  revalidatePath(`/books/${bookData.openLibraryId}`);
-  revalidatePath("/dashboard");
+  // refresh() invalida el router client-side sin forzar navegación
+  refresh();
 
   return { activeLists };
 }

@@ -65,14 +65,6 @@ export function RatingWidget({
             <span className="font-medium text-zinc-700 dark:text-zinc-300">
               {displayRating.toFixed(1)}
             </span>
-            {btCount > 0 ? (
-              <span>
-                {" "}
-                · {btCount} {btCount === 1 ? "lector" : "lectores"}
-              </span>
-            ) : externalCount > 0 ? (
-              <span> · {externalCount.toLocaleString()} reseñas (Open Library)</span>
-            ) : null}
           </span>
         ) : (
           <span className="text-sm text-zinc-400">Sin valoraciones aún</span>
