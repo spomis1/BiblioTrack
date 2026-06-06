@@ -7,6 +7,7 @@ import {
   getCoverUrl,
   extractDescription,
   getWorkRatings,
+  getAuthor,
 } from "@/lib/apis/openLibrary";
 import { ListButtons } from "@/components/books/ListButtons";
 import { RatingWidget } from "@/components/books/RatingWidget";
@@ -51,6 +52,15 @@ export default async function BookPage({
   ]);
 
   if (!work) notFound();
+
+  // Fetch autores en paralelo (máx 3)
+  const authorEntries = work.authors?.slice(0, 3) ?? [];
+  const authors = await Promise.all(
+    authorEntries.map(({ author }) => {
+      const authorId = author.key.replace("/authors/", "");
+      return getAuthor(authorId).catch(() => null);
+    })
+  );
 
   const {
     data: { user },
@@ -119,6 +129,27 @@ export default async function BookPage({
           <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-100">
             {work.title}
           </h1>
+
+          {/* Autores con link a su perfil */}
+          {authors.filter(Boolean).length > 0 && (
+            <div className="flex flex-wrap items-center gap-1 text-sm text-zinc-500">
+              <span>por</span>
+              {authors.filter(Boolean).map((author, i) => {
+                const authorId = author!.key.replace("/authors/", "");
+                return (
+                  <span key={author!.key}>
+                    <Link
+                      href={`/authors/${authorId}`}
+                      className="font-medium text-indigo-600 hover:underline dark:text-indigo-400"
+                    >
+                      {author!.name}
+                    </Link>
+                    {i < authors.filter(Boolean).length - 1 && ", "}
+                  </span>
+                );
+              })}
+            </div>
+          )}
 
           {work.subjects && work.subjects.length > 0 && (
             <div className="flex flex-wrap gap-2">

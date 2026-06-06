@@ -29,6 +29,21 @@ export interface OLWork {
   subjects?: string[];
   covers?: number[];
   first_publish_date?: string;
+  authors?: Array<{ author: { key: string }; type: { key: string } }>;
+}
+
+export interface OLAuthorSearchResult {
+  key: string; // "/authors/OL23919A"
+  name: string;
+  top_work?: string;
+  work_count?: number;
+  birth_date?: string;
+  top_subjects?: string[];
+}
+
+export interface OLAuthorSearchResponse {
+  numFound: number;
+  docs: OLAuthorSearchResult[];
 }
 
 export interface OLAuthor {
@@ -96,6 +111,25 @@ export function extractDescription(
   if (!desc) return null;
   if (typeof desc === "string") return desc;
   return desc.value ?? null;
+}
+
+export async function searchAuthors(
+  query: string,
+  limit = 20
+): Promise<OLAuthorSearchResponse> {
+  const params = new URLSearchParams({ q: query, limit: String(limit) });
+  const res = await fetch(`${BASE_URL}/search/authors.json?${params}`, {
+    headers,
+  });
+  if (!res.ok) throw new Error(`Author search failed: ${res.status}`);
+  return res.json();
+}
+
+export function getAuthorPhotoUrl(
+  photoId: number,
+  size: "S" | "M" | "L" = "M"
+): string {
+  return `${COVERS_URL}/a/id/${photoId}-${size}.jpg`;
 }
 
 /** Rating promedio de Open Library para una obra */
