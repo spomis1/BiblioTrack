@@ -6,6 +6,7 @@ import {
   getAuthor,
   getAuthorWorks,
   getCoverUrl,
+  type OLWork,
 } from "@/lib/apis/openLibrary";
 import { getAuthorWikiSummary } from "@/lib/apis/wikipedia";
 import { AuthorAvatar } from "@/components/authors/AuthorAvatar";
@@ -27,6 +28,40 @@ function toSpanishDate(dateStr: string): string {
     /\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/gi,
     (m) => meses[m.toLowerCase()] ?? m
   );
+}
+
+/**
+ * Elimina duplicados por título normalizado.
+ * Si dos obras tienen el mismo título base (sin subtítulos ni puntuación),
+ * se queda con la que tiene portada. Así eliminamos traducciones y
+ * ediciones repetidas que Open Library registra como obras separadas.
+ */
+function deduplicateWorks(entries: OLWork[]): OLWork[] {
+  function normalize(title: string): string {
+    return title
+      .toLowerCase()
+      .replace(/[:\-–—].*/g, "")   // sacar subtítulos
+      .replace(/[^a-záéíóúñüa-z0-9\s]/gi, "")
+      .trim();
+  }
+
+  const seen = new Map<string, OLWork>();
+  for (const work of entries) {
+    const key = normalize(work.title);
+    if (!key) continue;
+    const existing = seen.get(key);
+    // Preferir el que tiene portada
+    if (!existing || (!existing.covers?.length && work.covers?.length)) {
+      seen.set(key, work);
+    }
+  }
+
+  return Array.from(seen.values()).sort((a, b) => {
+    // Portadas primero
+    const aHas = (a.covers?.length ?? 0) > 0 ? 1 : 0;
+    const bHas = (b.covers?.length ?? 0) > 0 ? 1 : 0;
+    return bHas - aHas;
+  });
 }
 
 export async function generateMetadata({
@@ -53,54 +88,42 @@ export default async function AuthorPage({
 }) {
   const { id } = await params;
 
+  // Pedimos 200 para tener más datos antes de deduplicar
   const [author, worksData] = await Promise.all([
     getAuthor(id).catch(() => null),
-    getAuthorWorks(id, 50).catch(() => ({ entries: [] })),
+    getAuthorWorks(id, 200).catch(() => ({ entries: [] })),
   ]);
 
   if (!author) notFound();
 
-  // Traer bio de Wikipedia (español primero, inglés de respaldo)
   const wiki = await getAuthorWikiSummary(author.name, author.wikipedia ?? undefined);
-
-  // Usar la bio de Wikipedia si es más completa que la de OL
   const bio = wiki?.extract ?? null;
   const wikiUrl = wiki?.content_urls?.desktop?.page ?? author.wikipedia ?? null;
 
-  // Obras con portada primero, luego sin portada
-  const works = [...worksData.entries].sort((a, b) => {
-    const aHasCover = (a.covers?.length ?? 0) > 0 ? 1 : 0;
-    const bHasCover = (b.covers?.length ?? 0) > 0 ? 1 : 0;
-    return bHasCover - aHasCover;
-  });
+  const totalRaw = worksData.entries.length;
+  const works = deduplicateWorks(worksData.entries);
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
-      {/* Header del autor */}
+      {/* Header */}
       <div className="mb-12 flex flex-col gap-8 sm:flex-row">
-        {/* Foto */}
         <AuthorAvatar olid={id} name={author.name} size="lg" />
 
-        {/* Info */}
         <div className="flex flex-col gap-3">
           <h1 className="text-4xl font-bold text-zinc-900 dark:text-zinc-100">
             {author.name}
           </h1>
 
-          {/* Fechas de vida */}
           {(author.birth_date || author.death_date) && (
             <div className="flex items-center gap-1.5 text-sm text-zinc-500">
               <Calendar className="h-4 w-4 flex-shrink-0" />
               <span>
                 {author.birth_date ? toSpanishDate(author.birth_date) : "?"}
-                {author.death_date
-                  ? ` – ${toSpanishDate(author.death_date)}`
-                  : ""}
+                {author.death_date ? ` – ${toSpanishDate(author.death_date)}` : ""}
               </span>
             </div>
           )}
 
-          {/* Biografía */}
           {bio ? (
             <p className="max-w-2xl leading-relaxed text-zinc-600 dark:text-zinc-400">
               {bio}
@@ -109,7 +132,6 @@ export default async function AuthorPage({
             <p className="text-sm text-zinc-400">Biografía no disponible.</p>
           )}
 
-          {/* Link Wikipedia */}
           {wikiUrl && (
             <a
               href={wikiUrl}
@@ -126,11 +148,18 @@ export default async function AuthorPage({
 
       {/* Obras */}
       <div>
-        <h2 className="mb-2 text-2xl font-bold text-zinc-900 dark:text-zinc-100">
+        <h2 className="mb-1 text-2xl font-bold text-zinc-900 dark:text-zinc-100">
           Obras
         </h2>
+        {/* Explicación del conteo */}
         <p className="mb-6 text-sm text-zinc-400">
-          {works.length} título{works.length !== 1 ? "s" : ""} en Open Library
+          {works.length} título{works.length !== 1 ? "s" : ""} únicos
+          {totalRaw > works.length && (
+            <span className="ml-1">
+              · Open Library registra {totalRaw} entradas en total, incluyendo traducciones y
+              ediciones en distintos idiomas
+            </span>
+          )}
         </p>
 
         {works.length === 0 ? (
@@ -158,14 +187,21 @@ export default async function AuthorPage({
                         className="object-cover"
                       />
                     ) : (
-                      <div className="flex h-full items-center justify-center">
-                        <BookOpen className="h-8 w-8 text-zinc-300 dark:text-zinc-600" />
+                      /* Sin portada: mostrar título dentro de la tarjeta */
+                      <div className="flex h-full flex-col items-center justify-center gap-2 p-3 text-center">
+                        <BookOpen className="h-6 w-6 flex-shrink-0 text-zinc-300 dark:text-zinc-600" />
+                        <p className="line-clamp-4 text-[10px] leading-tight text-zinc-400 dark:text-zinc-500">
+                          {work.title}
+                        </p>
                       </div>
                     )}
                   </div>
-                  <p className="line-clamp-2 px-1 text-xs font-medium leading-snug text-zinc-700 dark:text-zinc-300">
-                    {work.title}
-                  </p>
+                  {/* Solo mostrar título debajo si tiene portada */}
+                  {coverUrl && (
+                    <p className="line-clamp-2 px-1 text-xs font-medium leading-snug text-zinc-700 dark:text-zinc-300">
+                      {work.title}
+                    </p>
+                  )}
                 </Link>
               );
             })}
