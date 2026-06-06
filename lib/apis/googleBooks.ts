@@ -68,3 +68,82 @@ export function getHighResCover(volume: GBVolume): string | null {
   // Google Books thumbnails can be upgraded to zoom=1 for higher res
   return thumb.replace("zoom=1", "zoom=2").replace("&edge=curl", "");
 }
+
+// ─── Author works (clean, language-filtered) ──────────────────────────────
+
+const JUNK_TITLE =
+  /\b(omnibus|collected works|selected works|complete works|anthology|study of|criticism of)\b/i;
+
+function normalizeForDedup(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[:\-–—].*/g, "")
+    .replace(/[^a-z0-9\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 50);
+}
+
+async function searchByAuthorAndLang(
+  authorName: string,
+  lang: "en" | "es",
+  maxResults = 40
+): Promise<GBVolume[]> {
+  const params = new URLSearchParams({
+    q: `inauthor:"${authorName}"`,
+    printType: "books",
+    langRestrict: lang,
+    maxResults: String(maxResults),
+    orderBy: "relevance",
+  });
+
+  const key = getApiKey();
+  if (key) params.set("key", key);
+
+  try {
+    const res = await fetch(`${BASE_URL}/volumes?${params}`, {
+      next: { revalidate: 3600 },
+    });
+    if (!res.ok) return [];
+    const data: GBSearchResponse = await res.json();
+    return data.items ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Devuelve la lista de obras de un autor en inglés y español.
+ * Google Books filtra por idioma nativo → no aparecen traducciones a otros idiomas.
+ * Se deduplica por título normalizado (inglés primero, luego español).
+ * Ordenado: con portada primero.
+ */
+export async function getAuthorWorksFromGB(
+  authorName: string
+): Promise<GBVolume[]> {
+  const [en, es] = await Promise.all([
+    searchByAuthorAndLang(authorName, "en", 40),
+    searchByAuthorAndLang(authorName, "es", 20),
+  ]);
+
+  const seen = new Map<string, GBVolume>();
+
+  for (const vol of [...en, ...es]) {
+    if (JUNK_TITLE.test(vol.volumeInfo.title)) continue;
+    const key = normalizeForDedup(vol.volumeInfo.title);
+    if (!key) continue;
+    const existing = seen.get(key);
+    if (!existing) {
+      seen.set(key, vol);
+    } else if (!getHighResCover(existing) && getHighResCover(vol)) {
+      // Preferir la entrada con portada
+      seen.set(key, vol);
+    }
+  }
+
+  return Array.from(seen.values()).sort((a, b) => {
+    const aCover = getHighResCover(a) ? 1 : 0;
+    const bCover = getHighResCover(b) ? 1 : 0;
+    return bCover - aCover;
+  });
+}

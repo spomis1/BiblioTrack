@@ -2,13 +2,13 @@ import { notFound } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import type { Metadata } from "next";
-import {
-  getAuthor,
-  getAuthorWorks,
-  getCoverUrl,
-  type OLWork,
-} from "@/lib/apis/openLibrary";
+import { getAuthor } from "@/lib/apis/openLibrary";
 import { getAuthorWikiSummary } from "@/lib/apis/wikipedia";
+import {
+  getAuthorWorksFromGB,
+  getHighResCover,
+  extractIsbn,
+} from "@/lib/apis/googleBooks";
 import { AuthorAvatar } from "@/components/authors/AuthorAvatar";
 import { BookOpen, ExternalLink, Calendar } from "lucide-react";
 
@@ -28,127 +28,6 @@ function toSpanishDate(dateStr: string): string {
     /\b(january|february|march|april|may|june|july|august|september|october|november|december)\b/gi,
     (m) => meses[m.toLowerCase()] ?? m
   );
-}
-
-// Caracteres no latinos: hebreo, árabe, cirílico, CJK, indio, tailandés
-const NON_LATIN = /[Ѐ-ӿ؀-ۿ֐-׿一-鿿぀-ヿ가-힯ऀ-ॿ฀-๿]/;
-
-// Caracteres específicamente turcos (no aparecen en inglés/español/francés/alemán)
-const TURKISH_SPECIFIC = /[ğıŞş]/; // ğ ı Ş ş
-
-// Transliteraciones hebreas/árabes: "ha-", "al-", "ba-", "be-...-"
-const SEMITIC_TRANSLIT = /\bha-[a-z]|\bal-[a-z]|\bba-[a-z]|\bbe-[a-z]+-[a-z]/i;
-
-// Compilaciones comerciales, packs, estudios académicos
-const JUNK_TITLE = /\b(pack|omnibus|collected works|selected works|complete works|anthology|criticism of|study of)\b/i;
-
-// Contracciones catalán/francés: d'atzar, l'interior, l'histoire (incluye 'h)
-const CATALAN_FRENCH = /\b[dlnm]'[aeiouàáâäèéêëìíîïòóôöùúûüh]/i;
-
-// Euskera: sufijo -zko ("Kristalezko hiria")
-const BASQUE = /zko\b/i;
-
-// Palabras exclusivamente francesas
-const FRENCH_WORDS = /\b(chronique|poche|avec|dont|disparitions?|histoire|bonjour|leurs?)\b/i;
-
-// Marcadores de formato de edición (10X18, etc.)
-const FORMAT_EDITION = /\b\d+[xX]\d+\b/;
-
-// Diacríticos que NO existen en inglés ni en español estándar:
-// Francés/Catalán/Italiano: à â ê î ô û ë ï œ æ ç
-// Alemán/Nórdico: ä ö ü ß å ø
-// Polaco/Checo/Húngaro: ą ć ę ł ń ś ź ż č š ž ě ř ů ő ű
-// Rumano: ș ț ă
-const NON_EN_ES_DIACRITICS = /[àâêîôûëïœæçäöüßåøąćęłńśźżčšžěřůőűșță]/i;
-
-// Palabras características de idiomas europeos (no inglés/español)
-const FOREIGN_LANG_WORDS =
-  /\b(het|boek|illusies?|voor|unter|worten|leben\s+in|dziennik|zimowy|trylogia|nowojorska|przez|fosques|gizona|ilunpean|erokeriak|ikusezin|egunak|odasinda|karanliktaki|sarayi|yazi\s+odas|viaxes)\b/i;
-
-function normalizeTitle(title: string): string {
-  return title
-    .toLowerCase()
-    .replace(/\([^)]*\)/g, "")     // sacar etiquetas "(Novela)", "(Film)", etc.
-    .replace(/[:\-–—].*/g, "")     // sacar subtítulos
-    .replace(/[^a-záéíóúñüa-z0-9\s]/gi, "")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function isNoise(work: OLWork, authorName: string): boolean {
-  const title = work.title;
-
-  // Caracteres no latinos (hebreo, árabe, CJK, etc.)
-  if (NON_LATIN.test(title)) return true;
-
-  // Turco específico
-  if (TURKISH_SPECIFIC.test(title)) return true;
-
-  // Transliteraciones semíticas ("ha-", "al-")
-  if (SEMITIC_TRANSLIT.test(title)) return true;
-
-  // Packs y compilaciones
-  if (JUNK_TITLE.test(title)) return true;
-
-  // El título es exactamente el nombre del autor (estudio crítico sobre él)
-  const normTitle = normalizeTitle(title);
-  const normAuthor = authorName.toLowerCase().trim();
-  if (normTitle === normAuthor || normTitle === "") return true;
-
-  return false;
-}
-
-/**
- * Filtra ruido y elimina duplicados.
- *
- * Regla para obras SIN portada: se aplican todos los filtros de ruido.
- * Regla para obras CON portada: solo se filtran los casos obvios
- * (no-latinos, turco, semítico). Las traducciones con portada se muestran
- * porque Open Library las documenta activamente.
- *
- * Deduplicación: si dos obras tienen el mismo título normalizado,
- * gana la que tiene portada.
- */
-function filterAndDeduplicateWorks(entries: OLWork[], authorName: string): OLWork[] {
-  const ALWAYS_FILTER = (work: OLWork) => {
-    const title = work.title;
-    return (
-      NON_LATIN.test(title) ||
-      TURKISH_SPECIFIC.test(title) ||
-      SEMITIC_TRANSLIT.test(title) ||
-      CATALAN_FRENCH.test(title) ||
-      BASQUE.test(title) ||
-      FRENCH_WORDS.test(title) ||
-      FORMAT_EDITION.test(title) ||
-      NON_EN_ES_DIACRITICS.test(title) ||
-      FOREIGN_LANG_WORDS.test(title)
-    );
-  };
-
-  const filtered = entries.filter((work) => {
-    if (ALWAYS_FILTER(work)) return false;
-    const hasCover = (work.covers?.length ?? 0) > 0;
-    // Sin portada: filtrar también packs, crítica y título = nombre del autor
-    if (!hasCover && isNoise(work, authorName)) return false;
-    return true;
-  });
-
-  // Deduplicar: mismo título normalizado → quedarse con el que tiene portada
-  const seen = new Map<string, OLWork>();
-  for (const work of filtered) {
-    const key = normalizeTitle(work.title);
-    if (!key) continue;
-    const existing = seen.get(key);
-    if (!existing || (!existing.covers?.length && work.covers?.length)) {
-      seen.set(key, work);
-    }
-  }
-
-  return Array.from(seen.values()).sort((a, b) => {
-    const aHas = (a.covers?.length ?? 0) > 0 ? 1 : 0;
-    const bHas = (b.covers?.length ?? 0) > 0 ? 1 : 0;
-    return bHas - aHas;
-  });
 }
 
 export async function generateMetadata({
@@ -175,19 +54,17 @@ export default async function AuthorPage({
 }) {
   const { id } = await params;
 
-  // Pedimos 200 para tener más datos antes de deduplicar
-  const [author, worksData] = await Promise.all([
-    getAuthor(id).catch(() => null),
-    getAuthorWorks(id, 200).catch(() => ({ entries: [] })),
-  ]);
-
+  const author = await getAuthor(id).catch(() => null);
   if (!author) notFound();
 
-  const wiki = await getAuthorWikiSummary(author.name, author.wikipedia ?? undefined);
+  // Info del autor + obras en paralelo
+  const [wiki, works] = await Promise.all([
+    getAuthorWikiSummary(author.name, author.wikipedia ?? undefined),
+    getAuthorWorksFromGB(author.name),
+  ]);
+
   const bio = wiki?.extract ?? null;
   const wikiUrl = wiki?.content_urls?.desktop?.page ?? author.wikipedia ?? null;
-
-  const works = filterAndDeduplicateWorks(worksData.entries, author.name);
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
@@ -242,43 +119,45 @@ export default async function AuthorPage({
           <p className="text-zinc-400">No se encontraron obras para este autor.</p>
         ) : (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-            {works.map((work) => {
-              const workId = work.key.replace("/works/", "");
-              const coverId = work.covers?.[0];
-              const coverUrl = coverId ? getCoverUrl("id", coverId, "M") : null;
+            {works.map((vol) => {
+              const coverUrl = getHighResCover(vol);
+              const isbn = extractIsbn(vol);
+              const href = isbn ? `/books/isbn/${isbn}` : null;
 
-              return (
-                <Link
-                  key={work.key}
-                  href={`/books/${workId}`}
-                  className="group flex flex-col gap-2 rounded-lg p-2 transition-all hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
-                >
+              const card = (
+                <div className="group flex flex-col gap-2 rounded-lg p-2 transition-all hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
                   <div className="relative aspect-[2/3] w-full overflow-hidden rounded-md bg-zinc-100 shadow-sm transition-shadow group-hover:shadow-md dark:bg-zinc-800">
                     {coverUrl ? (
                       <Image
                         src={coverUrl}
-                        alt={work.title}
+                        alt={vol.volumeInfo.title}
                         fill
                         sizes="(max-width: 768px) 50vw, 16vw"
                         className="object-cover"
                       />
                     ) : (
-                      /* Sin portada: mostrar título dentro de la tarjeta */
                       <div className="flex h-full flex-col items-center justify-center gap-2 p-3 text-center">
                         <BookOpen className="h-6 w-6 flex-shrink-0 text-zinc-300 dark:text-zinc-600" />
                         <p className="line-clamp-4 text-[10px] leading-tight text-zinc-400 dark:text-zinc-500">
-                          {work.title}
+                          {vol.volumeInfo.title}
                         </p>
                       </div>
                     )}
                   </div>
-                  {/* Solo mostrar título debajo si tiene portada */}
                   {coverUrl && (
                     <p className="line-clamp-2 px-1 text-xs font-medium leading-snug text-zinc-700 dark:text-zinc-300">
-                      {work.title}
+                      {vol.volumeInfo.title}
                     </p>
                   )}
+                </div>
+              );
+
+              return href ? (
+                <Link key={vol.id} href={href}>
+                  {card}
                 </Link>
+              ) : (
+                <div key={vol.id}>{card}</div>
               );
             })}
           </div>
