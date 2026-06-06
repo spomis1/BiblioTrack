@@ -2,6 +2,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { Search } from "lucide-react";
 import { searchAuthors, type OLAuthorSearchResult } from "@/lib/apis/openLibrary";
+import { AuthorAvatar } from "@/components/authors/AuthorAvatar";
 import type { Metadata } from "next";
 
 const NOISE_PATTERNS = /colloque|conférence|conference|symposium|actes|proceedings/i;
@@ -75,9 +76,7 @@ async function AuthorResults({ query }: { query: string }) {
               href={`/authors/${authorId}`}
               className="group flex flex-col gap-2 rounded-xl border border-zinc-200 bg-white p-5 transition-all hover:border-indigo-300 hover:shadow-md dark:border-zinc-800 dark:bg-zinc-900"
             >
-              <div className="flex h-12 w-12 items-center justify-center rounded-full bg-indigo-100 text-xl font-bold text-indigo-700 dark:bg-indigo-900/50 dark:text-indigo-300">
-                {author.name.charAt(0)}
-              </div>
+              <AuthorAvatar olid={authorId} name={author.name} size="sm" />
               <div>
                 <p className="font-semibold text-zinc-900 group-hover:text-indigo-600 dark:text-zinc-100 dark:group-hover:text-indigo-400">
                   {author.name}

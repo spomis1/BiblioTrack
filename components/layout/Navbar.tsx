@@ -53,11 +53,11 @@ export async function Navbar() {
         {/* Right side: search + auth */}
         <div className="flex items-center gap-3">
           <Link
-            href="/books?q="
+            href="/search"
             className="flex items-center gap-2 rounded-full bg-zinc-100 px-4 py-2 text-sm text-zinc-500 hover:bg-zinc-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 transition-colors"
           >
             <Search className="h-4 w-4" />
-            <span className="hidden sm:inline">Buscar libros...</span>
+            <span className="hidden sm:inline">Buscar...</span>
           </Link>
 
           {user && displayName ? (
