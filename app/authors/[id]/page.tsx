@@ -30,34 +30,92 @@ function toSpanishDate(dateStr: string): string {
   );
 }
 
-/**
- * Elimina duplicados por título normalizado.
- * Si dos obras tienen el mismo título base (sin subtítulos ni puntuación),
- * se queda con la que tiene portada. Así eliminamos traducciones y
- * ediciones repetidas que Open Library registra como obras separadas.
- */
-function deduplicateWorks(entries: OLWork[]): OLWork[] {
-  function normalize(title: string): string {
-    return title
-      .toLowerCase()
-      .replace(/[:\-–—].*/g, "")   // sacar subtítulos
-      .replace(/[^a-záéíóúñüa-z0-9\s]/gi, "")
-      .trim();
-  }
+// Caracteres no latinos: hebreo, árabe, cirílico, CJK, indio, tailandés
+const NON_LATIN = /[Ѐ-ӿ؀-ۿ֐-׿一-鿿぀-ヿ가-힯ऀ-ॿ฀-๿]/;
 
+// Caracteres específicamente turcos (no aparecen en inglés/español/francés/alemán)
+const TURKISH_SPECIFIC = /[ğıŞş]/; // ğ ı Ş ş
+
+// Transliteraciones hebreas/árabes: "ha-", "al-", "ba-", "be-...-"
+const SEMITIC_TRANSLIT = /\bha-[a-z]|\bal-[a-z]|\bba-[a-z]|\bbe-[a-z]+-[a-z]/i;
+
+// Compilaciones comerciales, packs, estudios académicos
+const JUNK_TITLE = /\b(pack|omnibus|collected works|selected works|complete works|anthology|criticism of|study of)\b/i;
+
+function normalizeTitle(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, "")     // sacar etiquetas "(Novela)", "(Film)", etc.
+    .replace(/[:\-–—].*/g, "")     // sacar subtítulos
+    .replace(/[^a-záéíóúñüa-z0-9\s]/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isNoise(work: OLWork, authorName: string): boolean {
+  const title = work.title;
+
+  // Caracteres no latinos (hebreo, árabe, CJK, etc.)
+  if (NON_LATIN.test(title)) return true;
+
+  // Turco específico
+  if (TURKISH_SPECIFIC.test(title)) return true;
+
+  // Transliteraciones semíticas ("ha-", "al-")
+  if (SEMITIC_TRANSLIT.test(title)) return true;
+
+  // Packs y compilaciones
+  if (JUNK_TITLE.test(title)) return true;
+
+  // El título es exactamente el nombre del autor (estudio crítico sobre él)
+  const normTitle = normalizeTitle(title);
+  const normAuthor = authorName.toLowerCase().trim();
+  if (normTitle === normAuthor || normTitle === "") return true;
+
+  return false;
+}
+
+/**
+ * Filtra ruido y elimina duplicados.
+ *
+ * Regla para obras SIN portada: se aplican todos los filtros de ruido.
+ * Regla para obras CON portada: solo se filtran los casos obvios
+ * (no-latinos, turco, semítico). Las traducciones con portada se muestran
+ * porque Open Library las documenta activamente.
+ *
+ * Deduplicación: si dos obras tienen el mismo título normalizado,
+ * gana la que tiene portada.
+ */
+function filterAndDeduplicateWorks(entries: OLWork[], authorName: string): OLWork[] {
+  const ALWAYS_FILTER = (work: OLWork) => {
+    const title = work.title;
+    return (
+      NON_LATIN.test(title) ||
+      TURKISH_SPECIFIC.test(title) ||
+      SEMITIC_TRANSLIT.test(title)
+    );
+  };
+
+  const filtered = entries.filter((work) => {
+    if (ALWAYS_FILTER(work)) return false;
+    const hasCover = (work.covers?.length ?? 0) > 0;
+    // Sin portada: filtrar también packs, crítica y título = nombre del autor
+    if (!hasCover && isNoise(work, authorName)) return false;
+    return true;
+  });
+
+  // Deduplicar: mismo título normalizado → quedarse con el que tiene portada
   const seen = new Map<string, OLWork>();
-  for (const work of entries) {
-    const key = normalize(work.title);
+  for (const work of filtered) {
+    const key = normalizeTitle(work.title);
     if (!key) continue;
     const existing = seen.get(key);
-    // Preferir el que tiene portada
     if (!existing || (!existing.covers?.length && work.covers?.length)) {
       seen.set(key, work);
     }
   }
 
   return Array.from(seen.values()).sort((a, b) => {
-    // Portadas primero
     const aHas = (a.covers?.length ?? 0) > 0 ? 1 : 0;
     const bHas = (b.covers?.length ?? 0) > 0 ? 1 : 0;
     return bHas - aHas;
@@ -101,7 +159,7 @@ export default async function AuthorPage({
   const wikiUrl = wiki?.content_urls?.desktop?.page ?? author.wikipedia ?? null;
 
   const totalRaw = worksData.entries.length;
-  const works = deduplicateWorks(worksData.entries);
+  const works = filterAndDeduplicateWorks(worksData.entries, author.name);
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
