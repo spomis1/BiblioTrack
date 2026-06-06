@@ -8,6 +8,9 @@ import {
   extractDescription,
 } from "@/lib/apis/openLibrary";
 import { StarRating } from "@/components/books/StarRating";
+import { ListButtons } from "@/components/books/ListButtons";
+import { createClient } from "@/lib/supabase/server";
+import { getBookActiveLists } from "@/app/actions/lists";
 
 interface Params {
   id: string;
@@ -23,7 +26,8 @@ export async function generateMetadata({
     const work = await getWork(id);
     return {
       title: work.title,
-      description: extractDescription(work.description)?.slice(0, 160) ?? undefined,
+      description:
+        extractDescription(work.description)?.slice(0, 160) ?? undefined,
     };
   } catch {
     return { title: "Libro no encontrado" };
@@ -37,23 +41,44 @@ export default async function BookPage({
 }) {
   const { id } = await params;
 
-  let work;
-  try {
-    work = await getWork(id);
-  } catch {
-    notFound();
-  }
+  // Cargar libro y auth en paralelo
+  const [workResult, supabase] = await Promise.all([
+    getWork(id).catch(() => null),
+    createClient(),
+  ]);
+
+  if (!workResult) notFound();
+  const work = workResult;
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
 
   const coverId = work.covers?.[0];
   const coverUrl = coverId ? getCoverUrl("id", coverId, "L") : null;
   const description = extractDescription(work.description);
 
+  // Leer el año de publicación (puede ser string como "1954" o "April 1954")
+  const publishedYear = work.first_publish_date
+    ? parseInt(work.first_publish_date)
+    : null;
+
+  // Estado de listas del usuario (solo si está logueado)
+  const activeLists = user ? await getBookActiveLists(id) : [];
+
+  const bookData = {
+    openLibraryId: id,
+    title: work.title,
+    coverUrl,
+    publishedYear: isNaN(publishedYear ?? NaN) ? null : publishedYear,
+  };
+
   return (
     <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
       <div className="flex flex-col gap-8 sm:flex-row">
-        {/* Cover */}
+        {/* Portada */}
         <div className="flex-shrink-0">
-          <div className="relative h-80 w-52 overflow-hidden rounded-lg shadow-lg bg-zinc-100 dark:bg-zinc-800 mx-auto sm:mx-0">
+          <div className="relative mx-auto h-80 w-52 overflow-hidden rounded-lg bg-zinc-100 shadow-lg dark:bg-zinc-800 sm:mx-0">
             {coverUrl ? (
               <Image
                 src={coverUrl}
@@ -92,7 +117,9 @@ export default async function BookPage({
 
           <div className="flex items-center gap-3">
             <StarRating value={0} size="md" />
-            <span className="text-sm text-zinc-500">Sin valoraciones aún — ¡sé el primero!</span>
+            <span className="text-sm text-zinc-500">
+              Sin valoraciones aún — ¡sé el primero!
+            </span>
           </div>
 
           {work.first_publish_date && (
@@ -101,36 +128,30 @@ export default async function BookPage({
             </p>
           )}
 
-          {/* Add to list buttons */}
-          <div className="flex flex-wrap gap-3 mt-2">
-            <button className="rounded-full bg-indigo-600 px-5 py-2 text-sm font-medium text-white hover:bg-indigo-700 transition-colors">
-              + Quiero leer
-            </button>
-            <button className="rounded-full border border-zinc-300 px-5 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-colors">
-              Leyendo ahora
-            </button>
-            <button className="rounded-full border border-zinc-300 px-5 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800 transition-colors">
-              Ya lo leí
-            </button>
-          </div>
+          {/* Botones de lista — interactivos con persistencia */}
+          <ListButtons
+            bookData={bookData}
+            initialActiveLists={activeLists}
+            isLoggedIn={!!user}
+          />
 
-          {/* Amazon affiliate link placeholder */}
+          {/* Enlace Amazon */}
           <Link
             href={`https://www.amazon.com/s?k=${encodeURIComponent(work.title)}&tag=bibliotrack-20`}
             target="_blank"
             rel="noopener noreferrer"
-            className="inline-flex items-center gap-2 text-sm text-amber-600 hover:text-amber-700 font-medium"
+            className="inline-flex items-center gap-2 text-sm font-medium text-amber-600 hover:text-amber-700"
           >
             🛒 Comprar en Amazon
           </Link>
         </div>
       </div>
 
-      {/* Description */}
+      {/* Sinopsis */}
       {description && (
         <div className="mt-10">
-          <h2 className="text-xl font-semibold mb-3">Sinopsis</h2>
-          <p className="text-zinc-600 dark:text-zinc-400 leading-relaxed whitespace-pre-line">
+          <h2 className="mb-3 text-xl font-semibold">Sinopsis</h2>
+          <p className="whitespace-pre-line leading-relaxed text-zinc-600 dark:text-zinc-400">
             {description}
           </p>
         </div>
