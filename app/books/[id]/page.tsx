@@ -6,10 +6,12 @@ import {
   getWork,
   getCoverUrl,
   extractDescription,
+  getWorkRatings,
 } from "@/lib/apis/openLibrary";
-import { StarRating } from "@/components/books/StarRating";
 import { ListButtons } from "@/components/books/ListButtons";
+import { RatingWidget } from "@/components/books/RatingWidget";
 import { createClient } from "@/lib/supabase/server";
+import { db } from "@/lib/db";
 import { getBookActiveLists } from "@/app/actions/lists";
 
 interface Params {
@@ -41,14 +43,14 @@ export default async function BookPage({
 }) {
   const { id } = await params;
 
-  // Cargar libro y auth en paralelo
-  const [workResult, supabase] = await Promise.all([
+  // Fetch en paralelo: libro + ratings externos + auth
+  const [work, olRatings, supabase] = await Promise.all([
     getWork(id).catch(() => null),
+    getWorkRatings(id),
     createClient(),
   ]);
 
-  if (!workResult) notFound();
-  const work = workResult;
+  if (!work) notFound();
 
   const {
     data: { user },
@@ -57,14 +59,9 @@ export default async function BookPage({
   const coverId = work.covers?.[0];
   const coverUrl = coverId ? getCoverUrl("id", coverId, "L") : null;
   const description = extractDescription(work.description);
-
-  // Leer el año de publicación (puede ser string como "1954" o "April 1954")
   const publishedYear = work.first_publish_date
     ? parseInt(work.first_publish_date)
     : null;
-
-  // Estado de listas del usuario (solo si está logueado)
-  const activeLists = user ? await getBookActiveLists(id) : [];
 
   const bookData = {
     openLibraryId: id,
@@ -72,6 +69,27 @@ export default async function BookPage({
     coverUrl,
     publishedYear: isNaN(publishedYear ?? NaN) ? null : publishedYear,
   };
+
+  // Datos de DB: listas activas + rating del libro + rating del usuario
+  const [activeLists, dbBook, dbUser] = await Promise.all([
+    user ? getBookActiveLists(id) : Promise.resolve([]),
+    db.book.findUnique({ where: { openLibraryId: id } }),
+    user
+      ? db.user.findUnique({ where: { supabaseId: user.id } })
+      : Promise.resolve(null),
+  ]);
+
+  // Rating personal del usuario (si existe en nuestra DB)
+  let userRating = 0;
+  if (dbBook && dbUser) {
+    const rating = await db.rating.findUnique({
+      where: { userId_bookId: { userId: dbUser.id, bookId: dbBook.id } },
+    });
+    userRating = rating?.score ?? 0;
+  }
+
+  const btAvg = dbBook?.avgRating ?? 0;
+  const btCount = dbBook?.ratingsCount ?? 0;
 
   return (
     <div className="mx-auto max-w-5xl px-4 py-10 sm:px-6">
@@ -115,12 +133,16 @@ export default async function BookPage({
             </div>
           )}
 
-          <div className="flex items-center gap-3">
-            <StarRating value={0} size="md" />
-            <span className="text-sm text-zinc-500">
-              Sin valoraciones aún — ¡sé el primero!
-            </span>
-          </div>
+          {/* Rating (blended bayesiano + rating personal) */}
+          <RatingWidget
+            bookData={bookData}
+            externalAvg={olRatings?.average ?? null}
+            externalCount={olRatings?.count ?? 0}
+            btAvg={btAvg}
+            btCount={btCount}
+            initialUserRating={userRating}
+            isLoggedIn={!!user}
+          />
 
           {work.first_publish_date && (
             <p className="text-sm text-zinc-500">
@@ -128,7 +150,7 @@ export default async function BookPage({
             </p>
           )}
 
-          {/* Botones de lista — interactivos con persistencia */}
+          {/* Botones de lista */}
           <ListButtons
             bookData={bookData}
             initialActiveLists={activeLists}

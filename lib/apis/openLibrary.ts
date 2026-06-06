@@ -97,3 +97,23 @@ export function extractDescription(
   if (typeof desc === "string") return desc;
   return desc.value ?? null;
 }
+
+/** Rating promedio de Open Library para una obra */
+export async function getWorkRatings(workId: string): Promise<{
+  average: number;
+  count: number;
+} | null> {
+  try {
+    const id = workId.startsWith("/works/") ? workId : `/works/${workId}`;
+    const res = await fetch(`${BASE_URL}${id}/ratings.json`, {
+      headers,
+      next: { revalidate: 3600 },
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (!data.summary?.average || !data.summary?.count) return null;
+    return { average: data.summary.average, count: data.summary.count };
+  } catch {
+    return null;
+  }
+}

@@ -23,6 +23,25 @@ export function buildCoverUrl(
   return "/placeholder-book.svg";
 }
 
+/**
+ * Promedio bayesiano: combina un rating externo (Open Library / Google Books)
+ * con los ratings propios de BiblioTrack para evitar sesgos con pocos votos.
+ *
+ * W = cuántos "votos equivalentes" vale el rating externo (default 20).
+ * Con pocos votes propios, el externo domina. Con muchos, los propios dominan.
+ */
+export function bayesianAverage(
+  externalAvg: number | null,
+  btAvg: number,
+  btCount: number,
+  W = 20
+): number {
+  if (!externalAvg && btCount === 0) return 0;
+  if (!externalAvg) return btAvg;
+  if (btCount === 0) return externalAvg;
+  return (externalAvg * W + btAvg * btCount) / (W + btCount);
+}
+
 export function slugify(text: string): string {
   return text
     .toLowerCase()
