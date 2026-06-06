@@ -1,8 +1,40 @@
 import { Suspense } from "react";
 import Link from "next/link";
 import { Search } from "lucide-react";
-import { searchAuthors } from "@/lib/apis/openLibrary";
+import { searchAuthors, type OLAuthorSearchResult } from "@/lib/apis/openLibrary";
 import type { Metadata } from "next";
+
+const NOISE_PATTERNS = /colloque|conférence|conference|symposium|actes|proceedings/i;
+
+/**
+ * Filtra y deduplica los resultados de autores de Open Library:
+ * 1. Elimina entradas colaborativas (nombre contiene "/")
+ * 2. Elimina coloquios y eventos académicos
+ * 3. Elimina entradas sin obras cuando ya existe el mismo autor con obras
+ * 4. Por nombre duplicado → queda el de mayor work_count
+ * 5. Ordena por work_count desc
+ */
+function cleanAuthorResults(docs: OLAuthorSearchResult[]): OLAuthorSearchResult[] {
+  const filtered = docs.filter((a) => {
+    if (a.name.includes("/")) return false;       // "auster/furlan"
+    if (NOISE_PATTERNS.test(a.name)) return false; // "Colloque Paul Auster"
+    return true;
+  });
+
+  // Deduplicar por nombre normalizado → quedarse con el de más obras
+  const byName = new Map<string, OLAuthorSearchResult>();
+  for (const author of filtered) {
+    const key = author.name.toLowerCase().trim();
+    const existing = byName.get(key);
+    if (!existing || (author.work_count ?? 0) > (existing.work_count ?? 0)) {
+      byName.set(key, author);
+    }
+  }
+
+  return Array.from(byName.values()).sort(
+    (a, b) => (b.work_count ?? 0) - (a.work_count ?? 0)
+  );
+}
 
 export const metadata: Metadata = {
   title: "Autores",
@@ -21,9 +53,11 @@ const SUGGESTED = [
 ];
 
 async function AuthorResults({ query }: { query: string }) {
-  const results = await searchAuthors(query, 20);
+  // Pedimos más resultados de los que vamos a mostrar para tener margen de filtrado
+  const results = await searchAuthors(query, 40);
+  const authors = cleanAuthorResults(results.docs).slice(0, 12);
 
-  if (results.docs.length === 0) {
+  if (authors.length === 0) {
     return (
       <p className="py-20 text-center text-zinc-400">
         No se encontraron autores para &ldquo;{query}&rdquo;
@@ -32,12 +66,8 @@ async function AuthorResults({ query }: { query: string }) {
   }
 
   return (
-    <>
-      <p className="mb-6 text-sm text-zinc-500">
-        {results.numFound.toLocaleString()} resultados para &ldquo;{query}&rdquo;
-      </p>
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
-        {results.docs.map((author) => {
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
+      {authors.map((author) => {
           const authorId = author.key.replace("/authors/", "");
           return (
             <Link
@@ -69,8 +99,7 @@ async function AuthorResults({ query }: { query: string }) {
             </Link>
           );
         })}
-      </div>
-    </>
+    </div>
   );
 }
 
