@@ -42,17 +42,28 @@ const SEMITIC_TRANSLIT = /\bha-[a-z]|\bal-[a-z]|\bba-[a-z]|\bbe-[a-z]+-[a-z]/i;
 // Compilaciones comerciales, packs, estudios académicos
 const JUNK_TITLE = /\b(pack|omnibus|collected works|selected works|complete works|anthology|criticism of|study of)\b/i;
 
-// Contracciones catalán/francés: d'atzar, l'interior, m'ha, n'est
-const CATALAN_FRENCH = /\b[dlnm]'[aeiouàáâäèéêëìíîïòóôöùúûü]/i;
+// Contracciones catalán/francés: d'atzar, l'interior, l'histoire (incluye 'h)
+const CATALAN_FRENCH = /\b[dlnm]'[aeiouàáâäèéêëìíîïòóôöùúûüh]/i;
 
-// Euskera: sufijo -zko, -tzeko, etc. ("Kristalezko hiria")
+// Euskera: sufijo -zko ("Kristalezko hiria")
 const BASQUE = /zko\b/i;
 
-// Palabras exclusivamente francesas (nunca aparecen en español/inglés)
-const FRENCH_WORDS = /\b(chronique|poche|avec|dont)\b/i;
+// Palabras exclusivamente francesas
+const FRENCH_WORDS = /\b(chronique|poche|avec|dont|disparitions?|histoire|bonjour|leurs?)\b/i;
 
-// Marcadores de formato de edición (10X18, 10x12, etc.)
+// Marcadores de formato de edición (10X18, etc.)
 const FORMAT_EDITION = /\b\d+[xX]\d+\b/;
+
+// Diacríticos que NO existen en inglés ni en español estándar:
+// Francés/Catalán/Italiano: à â ê î ô û ë ï œ æ ç
+// Alemán/Nórdico: ä ö ü ß å ø
+// Polaco/Checo/Húngaro: ą ć ę ł ń ś ź ż č š ž ě ř ů ő ű
+// Rumano: ș ț ă
+const NON_EN_ES_DIACRITICS = /[àâêîôûëïœæçäöüßåøąćęłńśźżčšžěřůőűșță]/i;
+
+// Palabras características de idiomas europeos (no inglés/español)
+const FOREIGN_LANG_WORDS =
+  /\b(het|boek|illusies?|voor|unter|worten|leben\s+in|dziennik|zimowy|trylogia|nowojorska|przez|fosques|gizona|ilunpean|erokeriak|ikusezin|egunak|odasinda|karanliktaki|sarayi|yazi\s+odas|viaxes)\b/i;
 
 function normalizeTitle(title: string): string {
   return title
@@ -108,7 +119,9 @@ function filterAndDeduplicateWorks(entries: OLWork[], authorName: string): OLWor
       CATALAN_FRENCH.test(title) ||
       BASQUE.test(title) ||
       FRENCH_WORDS.test(title) ||
-      FORMAT_EDITION.test(title)
+      FORMAT_EDITION.test(title) ||
+      NON_EN_ES_DIACRITICS.test(title) ||
+      FOREIGN_LANG_WORDS.test(title)
     );
   };
 
