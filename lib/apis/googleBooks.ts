@@ -104,10 +104,17 @@ async function searchByAuthorAndLang(
     const res = await fetch(`${BASE_URL}/volumes?${params}`, {
       next: { revalidate: 3600 },
     });
-    if (!res.ok) return [];
+    if (!res.ok) {
+      console.error(
+        `[GoogleBooks] ${res.status} ${res.statusText} — author="${authorName}" lang=${lang}` +
+        (res.status === 403 ? " (falta GOOGLE_BOOKS_API_KEY)" : "")
+      );
+      return [];
+    }
     const data: GBSearchResponse = await res.json();
     return data.items ?? [];
-  } catch {
+  } catch (err) {
+    console.error(`[GoogleBooks] fetch error — author="${authorName}" lang=${lang}:`, err);
     return [];
   }
 }

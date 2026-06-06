@@ -2,12 +2,18 @@ import { notFound } from "next/navigation";
 import Image from "next/image";
 import Link from "next/link";
 import type { Metadata } from "next";
-import { getAuthor } from "@/lib/apis/openLibrary";
+import {
+  getAuthor,
+  getAuthorWorks,
+  getCoverUrl,
+  type OLWork,
+} from "@/lib/apis/openLibrary";
 import { getAuthorWikiSummary } from "@/lib/apis/wikipedia";
 import {
   getAuthorWorksFromGB,
   getHighResCover,
   extractIsbn,
+  type GBVolume,
 } from "@/lib/apis/googleBooks";
 import { AuthorAvatar } from "@/components/authors/AuthorAvatar";
 import { BookOpen, ExternalLink, Calendar } from "lucide-react";
@@ -30,6 +36,57 @@ function toSpanishDate(dateStr: string): string {
   );
 }
 
+// ── Tipo unificado para renderizar sin importar la fuente ──────────────────
+interface BookCard {
+  id: string;
+  title: string;
+  coverUrl: string | null;
+  href: string | null;
+}
+
+// ── Conversores ────────────────────────────────────────────────────────────
+function fromGB(volumes: GBVolume[]): BookCard[] {
+  return volumes.map((vol) => {
+    const isbn = extractIsbn(vol);
+    return {
+      id: vol.id,
+      title: vol.volumeInfo.title,
+      coverUrl: getHighResCover(vol),
+      href: isbn ? `/books/isbn/${isbn}` : null,
+    };
+  });
+}
+
+// Filtro mínimo de OL: solo no-latinos, dedup por título, portadas primero
+const NON_LATIN_OL = /[Ѐ-ӿ؀-ۿ֐-׿一-鿿぀-ヿ가-힯ऀ-ॿ฀-๿]/;
+
+function fromOL(entries: OLWork[]): BookCard[] {
+  const seen = new Map<string, OLWork>();
+  for (const work of entries) {
+    if (NON_LATIN_OL.test(work.title)) continue;
+    const key = work.title
+      .toLowerCase()
+      .replace(/[:\-–—].*/g, "")
+      .replace(/[^a-z0-9]/g, "")
+      .slice(0, 40);
+    if (!key) continue;
+    const existing = seen.get(key);
+    if (!existing || (!existing.covers?.length && work.covers?.length)) {
+      seen.set(key, work);
+    }
+  }
+
+  return Array.from(seen.values())
+    .sort((a, b) => ((b.covers?.length ?? 0) > 0 ? 1 : 0) - ((a.covers?.length ?? 0) > 0 ? 1 : 0))
+    .map((w) => ({
+      id: w.key,
+      title: w.title,
+      coverUrl: w.covers?.[0] ? getCoverUrl("id", w.covers[0], "M") : null,
+      href: `/books/${w.key.replace("/works/", "")}`,
+    }));
+}
+
+// ── Metadata ───────────────────────────────────────────────────────────────
 export async function generateMetadata({
   params,
 }: {
@@ -47,6 +104,7 @@ export async function generateMetadata({
   }
 }
 
+// ── Página ─────────────────────────────────────────────────────────────────
 export default async function AuthorPage({
   params,
 }: {
@@ -57,11 +115,20 @@ export default async function AuthorPage({
   const author = await getAuthor(id).catch(() => null);
   if (!author) notFound();
 
-  // Info del autor + obras en paralelo
-  const [wiki, works] = await Promise.all([
+  // Info del autor + Google Books en paralelo
+  const [wiki, gbVolumes] = await Promise.all([
     getAuthorWikiSummary(author.name, author.wikipedia ?? undefined),
     getAuthorWorksFromGB(author.name),
   ]);
+
+  // Si Google Books falló (sin API key), caemos a Open Library
+  let books: BookCard[];
+  if (gbVolumes.length > 0) {
+    books = fromGB(gbVolumes);
+  } else {
+    const worksData = await getAuthorWorks(id, 200).catch(() => ({ entries: [] as OLWork[] }));
+    books = fromOL(worksData.entries);
+  }
 
   const bio = wiki?.extract ?? null;
   const wikiUrl = wiki?.content_urls?.desktop?.page ?? author.wikipedia ?? null;
@@ -115,22 +182,18 @@ export default async function AuthorPage({
           Obras
         </h2>
 
-        {works.length === 0 ? (
+        {books.length === 0 ? (
           <p className="text-zinc-400">No se encontraron obras para este autor.</p>
         ) : (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-            {works.map((vol) => {
-              const coverUrl = getHighResCover(vol);
-              const isbn = extractIsbn(vol);
-              const href = isbn ? `/books/isbn/${isbn}` : null;
-
-              const card = (
+            {books.map((book) => {
+              const inner = (
                 <div className="group flex flex-col gap-2 rounded-lg p-2 transition-all hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
                   <div className="relative aspect-[2/3] w-full overflow-hidden rounded-md bg-zinc-100 shadow-sm transition-shadow group-hover:shadow-md dark:bg-zinc-800">
-                    {coverUrl ? (
+                    {book.coverUrl ? (
                       <Image
-                        src={coverUrl}
-                        alt={vol.volumeInfo.title}
+                        src={book.coverUrl}
+                        alt={book.title}
                         fill
                         sizes="(max-width: 768px) 50vw, 16vw"
                         className="object-cover"
@@ -139,25 +202,25 @@ export default async function AuthorPage({
                       <div className="flex h-full flex-col items-center justify-center gap-2 p-3 text-center">
                         <BookOpen className="h-6 w-6 flex-shrink-0 text-zinc-300 dark:text-zinc-600" />
                         <p className="line-clamp-4 text-[10px] leading-tight text-zinc-400 dark:text-zinc-500">
-                          {vol.volumeInfo.title}
+                          {book.title}
                         </p>
                       </div>
                     )}
                   </div>
-                  {coverUrl && (
+                  {book.coverUrl && (
                     <p className="line-clamp-2 px-1 text-xs font-medium leading-snug text-zinc-700 dark:text-zinc-300">
-                      {vol.volumeInfo.title}
+                      {book.title}
                     </p>
                   )}
                 </div>
               );
 
-              return href ? (
-                <Link key={vol.id} href={href}>
-                  {card}
+              return book.href ? (
+                <Link key={book.id} href={book.href}>
+                  {inner}
                 </Link>
               ) : (
-                <div key={vol.id}>{card}</div>
+                <div key={book.id}>{inner}</div>
               );
             })}
           </div>
