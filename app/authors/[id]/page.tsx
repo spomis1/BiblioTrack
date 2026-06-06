@@ -41,6 +41,7 @@ interface BookCard {
   id: string;
   title: string;
   coverUrl: string | null;
+  fallbackCoverUrl?: string | null;
   href: string | null;
 }
 
@@ -48,15 +49,17 @@ interface BookCard {
 function fromGB(volumes: GBVolume[]): BookCard[] {
   return volumes.map((vol) => {
     const isbn = extractIsbn(vol);
-    // Usamos portadas de Open Library por ISBN: más confiables que GB
-    // (GB sirve placeholder "image not available" cuando no tiene derechos de tapa)
+    // Primario: OL por ISBN (sin placeholders "image not available")
+    // Fallback: portada de GB (para cuando OL devuelve GIF 1×1 transparente)
     const coverUrl = isbn
       ? `https://covers.openlibrary.org/b/isbn/${isbn}-M.jpg`
-      : null;
+      : getHighResCover(vol);
+    const fallbackCoverUrl = isbn ? getHighResCover(vol) : null;
     return {
       id: vol.id,
       title: vol.volumeInfo.title,
       coverUrl,
+      fallbackCoverUrl,
       href: isbn ? `/books/isbn/${isbn}` : null,
     };
   });
@@ -196,7 +199,11 @@ export default async function AuthorPage({
                 <div className="group flex flex-col gap-2 rounded-lg p-2 transition-all hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
                   <div className="relative aspect-[2/3] w-full overflow-hidden rounded-md bg-zinc-100 shadow-sm transition-shadow group-hover:shadow-md dark:bg-zinc-800">
                     {book.coverUrl ? (
-                      <BookCoverImage src={book.coverUrl} title={book.title} />
+                      <BookCoverImage
+                        src={book.coverUrl}
+                        fallback={book.fallbackCoverUrl}
+                        title={book.title}
+                      />
                     ) : (
                       <div className="flex h-full flex-col items-center justify-center gap-2 p-3 text-center">
                         <BookOpen className="h-6 w-6 flex-shrink-0 text-zinc-300 dark:text-zinc-600" />
