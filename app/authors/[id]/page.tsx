@@ -1,5 +1,4 @@
 import { notFound } from "next/navigation";
-import Image from "next/image";
 import Link from "next/link";
 import type { Metadata } from "next";
 import {
@@ -16,6 +15,7 @@ import {
   type GBVolume,
 } from "@/lib/apis/googleBooks";
 import { AuthorAvatar } from "@/components/authors/AuthorAvatar";
+import { BookCoverImage } from "@/components/books/BookCoverImage";
 import { BookOpen, ExternalLink, Calendar } from "lucide-react";
 
 interface Params {
@@ -48,10 +48,15 @@ interface BookCard {
 function fromGB(volumes: GBVolume[]): BookCard[] {
   return volumes.map((vol) => {
     const isbn = extractIsbn(vol);
+    // Usamos portadas de Open Library por ISBN: más confiables que GB
+    // (GB sirve placeholder "image not available" cuando no tiene derechos de tapa)
+    const coverUrl = isbn
+      ? `https://covers.openlibrary.org/b/isbn/${isbn}-M.jpg`
+      : null;
     return {
       id: vol.id,
       title: vol.volumeInfo.title,
-      coverUrl: getHighResCover(vol),
+      coverUrl,
       href: isbn ? `/books/isbn/${isbn}` : null,
     };
   });
@@ -191,13 +196,7 @@ export default async function AuthorPage({
                 <div className="group flex flex-col gap-2 rounded-lg p-2 transition-all hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
                   <div className="relative aspect-[2/3] w-full overflow-hidden rounded-md bg-zinc-100 shadow-sm transition-shadow group-hover:shadow-md dark:bg-zinc-800">
                     {book.coverUrl ? (
-                      <Image
-                        src={book.coverUrl}
-                        alt={book.title}
-                        fill
-                        sizes="(max-width: 768px) 50vw, 16vw"
-                        className="object-cover"
-                      />
+                      <BookCoverImage src={book.coverUrl} title={book.title} />
                     ) : (
                       <div className="flex h-full flex-col items-center justify-center gap-2 p-3 text-center">
                         <BookOpen className="h-6 w-6 flex-shrink-0 text-zinc-300 dark:text-zinc-600" />
